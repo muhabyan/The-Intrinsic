@@ -134,6 +134,18 @@ TEXT = {
         "radar_no_data": "Data tidak tersedia (butuh koneksi internet).",
         "radar_note": "Analisis VWAP/OBV/Akumulasi-Distribusi dihitung dari OHLCV publik "
                       "(yfinance). Data broker per-emiten & kepemilikan KSEI butuh sumber khusus.",
+        "radar_tab_bandar": "🏦 Bandar (Broker)", "radar_tab_konglo": "👑 Konglomerat",
+        "radar_tab_corp": "📋 Aksi Korporasi", "radar_tab_signal": "📡 Sinyal VWAP",
+        "radar_buyers": "Broker Net Beli", "radar_sellers": "Broker Net Jual",
+        "radar_source": "Sumber", "radar_konglo_pick": "Pilih konglomerat",
+        "radar_portfolio": "Portofolio di IHSG", "radar_activity": "Aktivitas",
+        "radar_corp_yf": "Dividen & Stock Split (yfinance)",
+        "radar_corp_table": "Aksi Korporasi (right issue / akuisisi / backdoor)",
+        "radar_demo_note": "Menampilkan data DEMO — isi worksheet Google Sheets "
+                           "(BrokerSummary, KongloHoldings, CorpActions) atau jalankan broksum API untuk data nyata.",
+        "val_under": "Undervalued", "val_over": "Overvalued", "val_fair": "Wajar (Fair)",
+        "val_basis": "Dasar", "val_nodata": "data rasio tidak cukup", "val_weird": "data tidak wajar",
+        "news_related": "Terkait",
         "news_all": "🌐 Semua Sumber",
         "news_title": "Portal Berita", "news_source": "Sumber Berita",
         "sentiment_agg": "Sentimen Agregat", "summary": "Ringkasan",
@@ -200,6 +212,18 @@ TEXT = {
         "radar_no_data": "Data unavailable (needs internet).",
         "radar_note": "VWAP/OBV/Accumulation-Distribution computed from public OHLCV "
                       "(yfinance). Per-broker & KSEI ownership data need dedicated sources.",
+        "radar_tab_bandar": "🏦 Bandar (Brokers)", "radar_tab_konglo": "👑 Conglomerates",
+        "radar_tab_corp": "📋 Corporate Actions", "radar_tab_signal": "📡 VWAP Signal",
+        "radar_buyers": "Net Buyers", "radar_sellers": "Net Sellers",
+        "radar_source": "Source", "radar_konglo_pick": "Pick conglomerate",
+        "radar_portfolio": "Holdings in IDX", "radar_activity": "Activity",
+        "radar_corp_yf": "Dividends & Stock Splits (yfinance)",
+        "radar_corp_table": "Corporate Actions (rights issue / acquisition / backdoor)",
+        "radar_demo_note": "Showing DEMO data — fill Google Sheets worksheets "
+                           "(BrokerSummary, KongloHoldings, CorpActions) or run the broksum API for live data.",
+        "val_under": "Undervalued", "val_over": "Overvalued", "val_fair": "Fair",
+        "val_basis": "Basis", "val_nodata": "insufficient ratio data", "val_weird": "implausible data",
+        "news_related": "Related",
         "news_all": "🌐 All Sources",
         "news_title": "News Portal", "news_source": "News Source",
         "sentiment_agg": "Aggregate Sentiment", "summary": "Summary",
@@ -709,6 +733,35 @@ NEG_WORDS = {"rugi", "turun", "anjlok", "gugatan", "default", "pailit", "phk", "
              "cut", "down", "slump", "crash"}
 
 
+# Peta kata kunci -> kode emiten untuk mendeteksi "keterkaitan" berita.
+EMITEN_MAP = {
+    "bca": "BBCA", "bank central asia": "BBCA", "bri": "BBRI", "bank rakyat": "BBRI",
+    "mandiri": "BMRI", "bni": "BBNI", "telkom": "TLKM", "telkomsel": "TLKM",
+    "astra": "ASII", "adaro": "ADRO", "alamtri": "ADRO", "antam": "ANTM", "aneka tambang": "ANTM",
+    "gojek": "GOTO", "gotO": "GOTO", "tokopedia": "GOTO", "unilever": "UNVR",
+    "indofood": "INDF", "icbp": "ICBP", "barito": "BRPT", "chandra asri": "TPIA",
+    "barito renewables": "BREN", "merdeka": "MDKA", "amman": "AMMN", "bukalapak": "BUKA",
+    "bumi resources": "BUMI", "pertamina geothermal": "PGEO", "semen indonesia": "SMGR",
+    "kalbe": "KLBF", "gudang garam": "GGRM", "sampoerna": "HMSP", "bayan": "BYAN",
+    "united tractors": "UNTR", "petrosea": "PTRO", "prajogo": "BREN", "djarum": "BBCA",
+    "salim": "INDF", "pln": "PGEO", "garuda": "GIAA", "wijaya karya": "WIKA",
+    "jasa marga": "JSMR", "vale": "INCO", "harum": "HRUM", "medco": "MEDC",
+}
+
+
+def news_relevance(text: str, skor: int) -> list:
+    """Deteksi emiten terdampak + arah perkiraan (↑/↓/→) dari sentimen judul."""
+    tl = text.lower()
+    found = []
+    seen = set()
+    for kw, code in EMITEN_MAP.items():
+        if kw in tl and code not in seen:
+            seen.add(code)
+            found.append(code)
+    arrow = "↑" if skor > 0 else ("↓" if skor < 0 else "→")
+    return [(code, arrow) for code in found[:4]]
+
+
 def _clean_html(s: str, limit: int = 240) -> str:
     """Bersihkan tag HTML & entitas dari ringkasan RSS, lalu potong."""
     if not s:
@@ -734,10 +787,20 @@ def fetch_feed(url: str, source_name: str = "") -> list:
             tl = title.lower()
             sc = sum(1 for w in POS_WORDS if w in tl) - sum(1 for w in NEG_WORDS if w in tl)
             src = source_name or (title.rsplit(" - ", 1)[-1] if " - " in title else "")
-            summary = _clean_html(e.get("summary", "") or e.get("description", ""))
+            raw_sum = e.get("summary", "") or e.get("description", "")
+            if not raw_sum and e.get("content"):
+                try:
+                    raw_sum = e["content"][0].get("value", "")
+                except Exception:
+                    raw_sum = ""
+            summary = _clean_html(raw_sum)
+            # Buang judul yang terduplikasi di awal ringkasan (sering di Google News)
+            if summary and summary.lower().startswith(title.lower()[:30]):
+                summary = summary[len(title):].strip(" -–—|") or summary
             out.append({"judul": title, "link": e.get("link", ""),
                         "tanggal": e.get("published", ""), "sumber": src,
-                        "ringkas": summary, "skor": sc})
+                        "ringkas": summary, "skor": sc,
+                        "terkait": news_relevance(f"{title} {summary}", sc)})
         return out
     except Exception:
         return []
@@ -1087,6 +1150,58 @@ def _render_gauge(col, fig, fallback):
                         unsafe_allow_html=True)
 
 
+def _ratio_or_note(col, label, sane_val, raw_val, vmin, vmax, good, suffix):
+    """Gauge bila nilai wajar; kartu 'data tidak wajar' bila absurd; '—' bila kosong."""
+    with col:
+        if sane_val is not None and go is not None:
+            _plot(_gauge(label, sane_val, vmin, vmax, good, suffix))
+        elif raw_val is not None:
+            st.markdown(kpi_card(label, f"{raw_val:,.0f}{suffix}",
+                                 f'<span class="muted">{L("val_weird")}</span>'), unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="glass"><span class="muted">{label}: —</span></div>',
+                        unsafe_allow_html=True)
+
+
+def _sane(v, hi, allow_neg=False):
+    """Saring nilai rasio tak wajar (mis. PBV 13.000x dari data rusak)."""
+    if v is None:
+        return None
+    if not allow_neg and v <= 0:
+        return None
+    if abs(v) > hi:
+        return None
+    return v
+
+
+def valuation_verdict(info) -> tuple:
+    """Verdict Undervalued/Wajar/Overvalued dari PER + PBV + ROE. -> (label, cls, reasons)."""
+    per = _sane(info.get("trailingPE"), 1000)
+    pbv = _sane(info.get("priceToBook"), 1000)
+    roe = info.get("returnOnEquity")
+    score, reasons = 0, []
+    if per is not None:
+        if per < 10:
+            score += 1; reasons.append(f"PER {per:.1f}x rendah")
+        elif per > 25:
+            score -= 1; reasons.append(f"PER {per:.1f}x tinggi")
+    if pbv is not None:
+        if pbv < 1:
+            score += 1; reasons.append(f"PBV {pbv:.2f}x < nilai buku")
+        elif pbv > 3:
+            score -= 1; reasons.append(f"PBV {pbv:.2f}x tinggi")
+    if roe is not None:
+        if roe > 0.15:
+            score += 1; reasons.append(f"ROE {roe*100:.0f}% kuat")
+        elif roe < 0:
+            score -= 1; reasons.append("ROE negatif")
+    if score >= 1:
+        return L("val_under"), "bull", reasons
+    if score <= -1:
+        return L("val_over"), "bear", reasons
+    return L("val_fair"), "neut", reasons
+
+
 def page_fundamental(ticker):
     st.markdown(f'<p class="page-title">{L("fund_title")}</p>', unsafe_allow_html=True)
     info = get_info(ticker)
@@ -1095,12 +1210,17 @@ def page_fundamental(ticker):
         return
     name = info.get("longName") or info.get("shortName") or ticker
     price = info.get("currentPrice") or info.get("regularMarketPrice")
+    verdict, vcls, vreasons = valuation_verdict(info)
+    reason_txt = " · ".join(vreasons) if vreasons else L("val_nodata")
     st.markdown(
         f'<div class="glass" style="border-color:rgba(99,102,241,0.45)">'
-        f'<div style="font-size:1.4rem;font-weight:800">{name}</div>'
-        f'<div class="muted" style="margin-top:4px">{info.get("sector","—")} · {info.get("industry","—")}</div>'
+        f'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">'
+        f'<div><div style="font-size:1.4rem;font-weight:800">{name}</div>'
+        f'<div class="muted" style="margin-top:4px">{info.get("sector","—")} · {info.get("industry","—")}</div></div>'
+        f'<span class="badge {vcls}" style="font-size:0.95rem;padding:8px 18px">{verdict}</span></div>'
         f'<div style="margin-top:10px"><span class="chip chip-neut">{fmt_rp(price)}</span> &nbsp;'
-        f'<span class="chip chip-neut">Market Cap: {fmt_rp(info.get("marketCap"))}</span></div></div>',
+        f'<span class="chip chip-neut">Market Cap: {fmt_rp(info.get("marketCap"))}</span></div>'
+        f'<div class="muted" style="margin-top:8px;font-size:0.85rem">{L("val_basis")}: {reason_txt}</div></div>',
         unsafe_allow_html=True)
     st.write("")
     st.markdown(f'<p class="section-h">{L("key_ratios")}</p>', unsafe_allow_html=True)
@@ -1111,13 +1231,17 @@ def page_fundamental(ticker):
     roe_pct = roe * 100 if roe is not None else None
     dy_pct = (dy * 100 if dy < 1 else dy) if dy is not None else None
     eps = info.get("trailingEps")
+    # Saring rasio tak wajar agar gauge tidak rusak (PER/PBV); tampilkan angka mentah + catatan.
+    per_s = _sane(info.get("trailingPE"), 200)
+    pbv_s = _sane(info.get("priceToBook"), 60)
+    der_s = _sane(info.get("debtToEquity"), 1000)
     if go is not None:
         g1, g2, g3 = st.columns(3)
-        _render_gauge(g1, _gauge("PER (P/E)", info.get("trailingPE"), 0, 40, "low", "x"), "PER: —")
-        _render_gauge(g2, _gauge("PBV (P/B)", info.get("priceToBook"), 0, 10, "low", "x"), "PBV: —")
+        _ratio_or_note(g1, "PER (P/E)", per_s, info.get("trailingPE"), 0, 40, "low", "x")
+        _ratio_or_note(g2, "PBV (P/B)", pbv_s, info.get("priceToBook"), 0, 10, "low", "x")
         _render_gauge(g3, _gauge("ROE", roe_pct, 0, 40, "high", "%"), "ROE: —")
         g4, g5, g6 = st.columns(3)
-        _render_gauge(g4, _gauge("DER", info.get("debtToEquity"), 0, 200, "low", ""), "DER: —")
+        _ratio_or_note(g4, "DER", der_s, info.get("debtToEquity"), 0, 200, "low", "")
         _render_gauge(g5, _gauge("Dividend Yield", dy_pct, 0, 12, "high", "%"), "Div Yield: —")
         with g6:
             st.markdown(kpi_card(L("eps"), f"{eps:,.0f}" if eps is not None else "—",
@@ -1233,23 +1357,197 @@ def _ind_color(val):
     return f"color:{m.get(val, '#94a3b8')};font-weight:700"
 
 
-def page_radar():
-    st.markdown(f'<p class="page-title">{L("radar_title")}</p>', unsafe_allow_html=True)
-    st.caption(L("radar_caption"))
+# ---- Worksheet & data sumber untuk Bandar/Konglo (Sheets + broksum API) ----
+BROKER_WS, KONGLO_WS, CORP_WS = "BrokerSummary", "KongloHoldings", "CorpActions"
 
+KONGLO_DEMO = [
+    {"Konglomerat": "Prajogo Pangestu", "Emiten": "BREN", "Persen": 54.0, "Status": "Akumulasi"},
+    {"Konglomerat": "Prajogo Pangestu", "Emiten": "BRPT", "Persen": 70.0, "Status": "Hold"},
+    {"Konglomerat": "Prajogo Pangestu", "Emiten": "TPIA", "Persen": 33.0, "Status": "Hold"},
+    {"Konglomerat": "Prajogo Pangestu", "Emiten": "CUAN", "Persen": 68.0, "Status": "Akumulasi"},
+    {"Konglomerat": "Keluarga Hartono", "Emiten": "BBCA", "Persen": 54.94, "Status": "Hold"},
+    {"Konglomerat": "Anthoni Salim", "Emiten": "INDF", "Persen": 50.07, "Status": "Hold"},
+    {"Konglomerat": "Anthoni Salim", "Emiten": "ICBP", "Persen": 80.53, "Status": "Hold"},
+    {"Konglomerat": "Anthoni Salim", "Emiten": "DNET", "Persen": 34.0, "Status": "Right Issue"},
+    {"Konglomerat": "Low Tuck Kwong", "Emiten": "BYAN", "Persen": 61.0, "Status": "Distribusi"},
+    {"Konglomerat": "Garibaldi Thohir", "Emiten": "ADRO", "Persen": 35.0, "Status": "Dividen"},
+    {"Konglomerat": "Grup Astra (Jardine)", "Emiten": "ASII", "Persen": 50.11, "Status": "Hold"},
+    {"Konglomerat": "Grup Bakrie", "Emiten": "BUMI", "Persen": 24.0, "Status": "Akuisisi"},
+]
+CORP_DEMO = [
+    {"Emiten": "BBRI", "Aksi": "Dividen", "Detail": "Dividen tunai final Rp135/saham", "Tanggal": "2026-03-20"},
+    {"Emiten": "BREN", "Aksi": "Right Issue", "Detail": "Rencana HMETD untuk ekspansi panas bumi", "Tanggal": "2026-04-10"},
+    {"Emiten": "BUMI", "Aksi": "Akuisisi", "Detail": "Akuisisi aset mineral via anak usaha", "Tanggal": "2026-02-15"},
+    {"Emiten": "DNET", "Aksi": "Backdoor Listing", "Detail": "Indikasi backdoor oleh investor strategis", "Tanggal": "2026-01-30"},
+]
+
+
+def _broker_demo(kode: str) -> list:
+    rng = np.random.default_rng(sum(ord(x) for x in kode))
+    out = []
+    for b in ["BK", "MG", "CC", "AK", "YP", "PD", "DR", "KZ", "RX", "NI"]:
+        net = int(rng.integers(-150, 150)) * 100_000_000  # rupiah
+        out.append({"Broker": b, "Net_Value": net})
+    return out
+
+
+def fetch_broker_rows(kode: str, conn) -> tuple:
+    """Net value per broker. Urutan sumber: broksum API -> Sheets -> DEMO."""
+    try:
+        api = st.secrets["broksum"]["api_url"].rstrip("/")
+    except Exception:
+        api = ""
+    if api and requests is not None:
+        try:
+            r = requests.get(f"{api}/broksum/{kode}", timeout=8)
+            if r.ok:
+                rows = r.json().get("rows", [])
+                if rows:
+                    agg = {}
+                    for x in rows:
+                        agg[x.get("kode_broker", "?")] = agg.get(x.get("kode_broker", "?"), 0) + int(x.get("net_value", 0) or 0)
+                    return [{"Broker": k, "Net_Value": v} for k, v in agg.items()], "API broksum"
+        except Exception:
+            pass
+    if conn is not None:
+        df = _read_ws(conn, BROKER_WS, ttl=30)
+        if not df.empty and "kode_saham" in df and "kode_broker" in df:
+            sub = df[df["kode_saham"].astype(str).str.upper() == kode.upper()]
+            if not sub.empty:
+                return ([{"Broker": str(r.get("kode_broker", "?")),
+                          "Net_Value": int(float(r.get("net_value", 0) or 0))} for _, r in sub.iterrows()],
+                        BROKER_WS)
+    return _broker_demo(kode), "DEMO"
+
+
+def fetch_konglo(conn) -> tuple:
+    if conn is not None:
+        df = _read_ws(conn, KONGLO_WS, ttl=60)
+        if not df.empty and "Konglomerat" in df:
+            return df, KONGLO_WS
+    return pd.DataFrame(KONGLO_DEMO), "DEMO"
+
+
+def fetch_corp(conn) -> tuple:
+    if conn is not None:
+        df = _read_ws(conn, CORP_WS, ttl=60)
+        if not df.empty and "Emiten" in df:
+            return df, CORP_WS
+    return pd.DataFrame(CORP_DEMO), "DEMO"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_yf_actions(ticker: str):
+    if yf is None:
+        return None
+    try:
+        a = yf.Ticker(ticker).actions
+        return a if a is not None and not getattr(a, "empty", True) else None
+    except Exception:
+        return None
+
+
+def _fmt_b(v):
+    try:
+        return f"{v/1e9:+.2f}"
+    except Exception:
+        return "—"
+
+
+def _src_badge(src):
+    txt = L("radar_demo_note") if src == "DEMO" else f'{L("radar_source")}: {src}'
+    icon = "🚧" if src == "DEMO" else "✅"
+    st.caption(f"{icon} {txt}")
+
+
+def _tab_bandar(conn, ticker):
+    kode = ticker.replace(".JK", "")
+    st.markdown(f'<p class="section-h">{L("radar_buyers")} / {L("radar_sellers")} — {kode}</p>', unsafe_allow_html=True)
+    rows, src = fetch_broker_rows(kode, conn)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        st.info(L("radar_no_data"))
+        return
+    df["Net (Rp M)"] = df["Net_Value"].apply(_fmt_b)
+    buyers = df[df["Net_Value"] > 0].sort_values("Net_Value", ascending=False)
+    sellers = df[df["Net_Value"] < 0].sort_values("Net_Value")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f'<span class="chip chip-up">{L("radar_buyers")}</span>', unsafe_allow_html=True)
+        st.dataframe(buyers[["Broker", "Net (Rp M)"]], use_container_width=True, hide_index=True)
+    with c2:
+        st.markdown(f'<span class="chip chip-down">{L("radar_sellers")}</span>', unsafe_allow_html=True)
+        st.dataframe(sellers[["Broker", "Net (Rp M)"]], use_container_width=True, hide_index=True)
+    net = df["Net_Value"].sum()
+    side = "up" if net >= 0 else "down"
+    st.markdown(kpi_card(f"Net Total — {kode}", f"Rp {net/1e9:+.2f} M",
+                f'<span class="{side}">{"Akumulasi bersih" if net>=0 else "Distribusi bersih"}</span>', accent=True),
+                unsafe_allow_html=True)
+    _src_badge(src)
+
+
+def _tab_konglo(conn):
+    df, src = fetch_konglo(conn)
+    if df.empty:
+        st.info(L("radar_no_data"))
+        return
+    names = sorted(df["Konglomerat"].astype(str).unique())
+    pick = st.selectbox(L("radar_konglo_pick"), ["— " + L("news_all").split(" ")[-1] + " —"] + names)
+    view = df if pick.startswith("—") else df[df["Konglomerat"].astype(str) == pick]
+
+    st.markdown(f'<p class="section-h">{L("radar_portfolio")}</p>', unsafe_allow_html=True)
+    cols = [c for c in ["Konglomerat", "Emiten", "Persen", "Status"] if c in view.columns]
+    base = view[cols].style
+    cs = base.map if hasattr(base, "map") else base.applymap
+    try:
+        styler = cs(_ind_color, subset=["Status"]).format({"Persen": "{:.2f}%"})
+    except Exception:
+        styler = view[cols]
+    st.dataframe(styler, use_container_width=True, hide_index=True)
+
+    # Aktivitas: ringkasan per status
+    if "Status" in view.columns:
+        st.markdown(f'<p class="section-h">{L("radar_activity")}</p>', unsafe_allow_html=True)
+        counts = view["Status"].value_counts()
+        chips = " ".join(f'<span class="chip chip-neut">{k}: {v}</span>' for k, v in counts.items())
+        st.markdown(f'<div class="glass">{chips}</div>', unsafe_allow_html=True)
+    _src_badge(src)
+
+
+def _tab_corp(conn, ticker):
+    kode = ticker.replace(".JK", "")
+    st.markdown(f'<p class="section-h">{L("radar_corp_yf")} — {kode}</p>', unsafe_allow_html=True)
+    act = get_yf_actions(ticker)
+    if act is not None and go is not None:
+        recent = act.tail(12)
+        fig = go.Figure()
+        if "Dividends" in recent:
+            fig.add_trace(go.Bar(x=recent.index, y=recent["Dividends"], name="Dividen", marker_color=ACCENT_A))
+        if "Stock Splits" in recent:
+            sp = recent[recent["Stock Splits"] > 0]
+            if not sp.empty:
+                fig.add_trace(go.Scatter(x=sp.index, y=sp["Stock Splits"], name="Split",
+                              mode="markers", marker=dict(color="#f59e0b", size=10)))
+        _plot(_style_fig(fig, height=260))
+    else:
+        st.markdown(f'<div class="glass"><span class="muted">{L("radar_no_data")}</span></div>', unsafe_allow_html=True)
+
+    df, src = fetch_corp(conn)
+    st.markdown(f'<p class="section-h">{L("radar_corp_table")}</p>', unsafe_allow_html=True)
+    cols = [c for c in ["Emiten", "Aksi", "Detail", "Tanggal"] if c in df.columns]
+    st.dataframe(df[cols], use_container_width=True, hide_index=True)
+    _src_badge(src)
+
+
+def _tab_signal():
     raw = st.text_input(L("radar_watchlist"), value=", ".join(DEFAULT_WATCHLIST))
     tickers = [t.strip().upper() for t in raw.replace(";", ",").split(",") if t.strip()][:15]
-
     with st.spinner(L("radar_scanning")):
         rows = [m for m in (bandar_metrics(t) for t in tickers) if m]
-
     if not rows:
-        st.markdown(f'<div class="glass"><span class="muted">{L("radar_no_data")}</span></div>',
-                    unsafe_allow_html=True)
+        st.markdown(f'<div class="glass"><span class="muted">{L("radar_no_data")}</span></div>', unsafe_allow_html=True)
         return
-
     df = pd.DataFrame(rows)
-    # ringkasan count per indikasi
     akum = sum(1 for r in rows if r["Indikasi_Nipu"] in ("Akumulasi", "Markup"))
     dist = sum(1 for r in rows if r["Indikasi_Nipu"] in ("Distribusi", "Markdown"))
     c1, c2, c3 = st.columns(3)
@@ -1257,25 +1555,37 @@ def page_radar():
     c2.markdown(kpi_card("Distribusi/Markdown", f"{dist}", '<span class="down">net jual arah</span>'), unsafe_allow_html=True)
     c3.markdown(kpi_card("Dipindai", f"{len(rows)}", '<span class="muted">emiten</span>'), unsafe_allow_html=True)
     st.write("")
-
     base = df.style
-    cell_style = base.map if hasattr(base, "map") else base.applymap  # pandas 2.1+ vs 2.0
+    cell_style = base.map if hasattr(base, "map") else base.applymap
     styler = cell_style(_ind_color, subset=["Indikasi_Nipu"]).format(
         {"Harga": "{:,.0f}", "VWAP": "{:,.0f}", "vs VWAP %": "{:+.2f}",
          "Volume_Transaksi": "{:,.0f}", "Vol Ratio": "{:.2f}"})
     st.dataframe(styler, use_container_width=True, hide_index=True)
-
     st.write("")
     st.markdown(f'<p class="section-h">{L("radar_detail")}</p>', unsafe_allow_html=True)
     sel = st.selectbox("Emiten", [r["Emiten"] for r in rows], label_visibility="collapsed")
     _vwap_chart(sel)
-
     st.caption(L("radar_note"))
+
+
+def page_radar(conn, ticker):
+    st.markdown(f'<p class="page-title">{L("radar_title")}</p>', unsafe_allow_html=True)
+    st.caption(L("radar_caption"))
+    t1, t2, t3, t4 = st.tabs([L("radar_tab_bandar"), L("radar_tab_konglo"),
+                              L("radar_tab_corp"), L("radar_tab_signal")])
+    with t1:
+        _tab_bandar(conn, ticker)
+    with t2:
+        _tab_konglo(conn)
+    with t3:
+        _tab_corp(conn, ticker)
+    with t4:
+        _tab_signal()
     # TODO: Implement VWAP & KSEI logic here
-    #   VWAP/OBV/A-D sudah diimplementasikan di atas dari OHLCV publik.
-    #   Yang masih TODO (butuh sumber berbayar / scraping resmi):
-    #   - Broker summary per-emiten harian (net beli/jual per broker) via api.py/IDX
-    #   - Data kepemilikan KSEI (>=5%) untuk konfirmasi akumulasi bandar/konglomerat
+    #   - VWAP/OBV/A-D: sudah diimplementasikan (tab Sinyal).
+    #   - Broker flow: dari broksum API / worksheet BrokerSummary (live bila diisi).
+    #   - Kepemilikan KSEI & aksi korporasi: worksheet KongloHoldings / CorpActions
+    #     (butuh diisi manual / scraper, tidak ada feed gratis).
 
 
 def _time_ago(published: str) -> str:
@@ -1331,11 +1641,21 @@ def page_news(ticker):
         meta = " · ".join(x for x in [n.get("sumber", ""), _time_ago(n.get("tanggal", ""))] if x)
         summary = n.get("ringkas", "")
         sum_html = f'<div class="news-sum">{summary}</div>' if summary else ""
+        # Keterkaitan: emiten yang mungkin terdampak + arah perkiraan
+        rel = n.get("terkait", [])
+        if rel:
+            rel_chips = " ".join(
+                f'<span class="chip {"chip-up" if a=="↑" else ("chip-down" if a=="↓" else "chip-neut")}">{c} {a}</span>'
+                for c, a in rel)
+            rel_html = f'<div style="margin-top:8px">{L("news_related")}: {rel_chips}</div>'
+        else:
+            rel_html = ""
         st.markdown(
             f'<a class="news-card" href="{n["link"]}" target="_blank">'
             f'<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">'
             f'<span class="news-title">{n["judul"]}</span>{chip}</div>'
             f'{sum_html}'
+            f'{rel_html}'
             f'<div class="news-meta">{meta}</div></a>', unsafe_allow_html=True)
 
 
@@ -1446,7 +1766,7 @@ def main():
     elif page == L("nav_fundamental"):
         page_fundamental(ticker)
     elif page == L("nav_radar"):
-        page_radar()
+        page_radar(conn, ticker)
     elif page == L("nav_news"):
         page_news(ticker)
     else:
