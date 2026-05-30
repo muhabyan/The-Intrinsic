@@ -26,6 +26,8 @@ tanpa konfigurasi apa pun.
 """
 
 import os
+import re
+import html
 import hmac
 import hashlib
 import urllib.parse
@@ -124,8 +126,15 @@ TEXT = {
         "revenue": "Pendapatan", "net_income": "Laba Bersih",
         "fund_source": "Sumber: yfinance. Data dapat tertunda — verifikasi ke laporan resmi.",
         "radar_title": "Konglo & Bandar Radar", "radar_caption":
-            "Deteksi dominasi broker & indikasi akumulasi/distribusi (bandarmology).",
+            "Deteksi indikasi akumulasi/distribusi (bandarmology) via VWAP, OBV & A/D line.",
         "radar_placeholder": "Data placeholder — mesin VWAP & KSEI belum diimplementasikan.",
+        "radar_watchlist": "Watchlist (pisahkan dengan koma)",
+        "radar_scanning": "Memindai bandarmology…",
+        "radar_detail": "Detail VWAP & Volume",
+        "radar_no_data": "Data tidak tersedia (butuh koneksi internet).",
+        "radar_note": "Analisis VWAP/OBV/Akumulasi-Distribusi dihitung dari OHLCV publik "
+                      "(yfinance). Data broker per-emiten & kepemilikan KSEI butuh sumber khusus.",
+        "news_all": "🌐 Semua Sumber",
         "news_title": "Portal Berita", "news_source": "Sumber Berita",
         "sentiment_agg": "Sentimen Agregat", "summary": "Ringkasan",
         "positive": "positif", "negative": "negatif", "neutral": "netral",
@@ -183,8 +192,15 @@ TEXT = {
         "revenue": "Revenue", "net_income": "Net Income",
         "fund_source": "Source: yfinance. Data may be delayed — verify with official filings.",
         "radar_title": "Konglo & Bandar Radar", "radar_caption":
-            "Broker dominance & accumulation/distribution detection (bandarmology).",
+            "Accumulation/distribution detection (bandarmology) via VWAP, OBV & A/D line.",
         "radar_placeholder": "Placeholder data — VWAP & KSEI engine not yet implemented.",
+        "radar_watchlist": "Watchlist (comma-separated)",
+        "radar_scanning": "Scanning bandarmology…",
+        "radar_detail": "VWAP & Volume Detail",
+        "radar_no_data": "Data unavailable (needs internet).",
+        "radar_note": "VWAP/OBV/Accumulation-Distribution computed from public OHLCV "
+                      "(yfinance). Per-broker & KSEI ownership data need dedicated sources.",
+        "news_all": "🌐 All Sources",
         "news_title": "News Portal", "news_source": "News Source",
         "sentiment_agg": "Aggregate Sentiment", "summary": "Summary",
         "positive": "positive", "negative": "negative", "neutral": "neutral",
@@ -311,7 +327,9 @@ section[data-testid="stSidebar"] {{ background:{p['sidebar']}; border-right:1px 
     background:{p['card_bg']}; border:1px solid {p['card_border']}; transition: all .2s ease; animation: rise .5s ease both; }}
 .news-card:hover {{ border-color:rgba(99,102,241,0.5); transform:translateX(4px); }}
 .news-title {{ color:{p['title']}; font-weight:700; font-size:1rem; line-height:1.35; }}
-.news-meta {{ color:{p['muted']}; font-size:0.76rem; margin-top:6px; }}
+.news-sum {{ color:{p['text']}; opacity:0.82; font-size:0.86rem; line-height:1.45; margin-top:8px;
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }}
+.news-meta {{ color:{p['muted']}; font-size:0.76rem; margin-top:8px; }}
 .disclaimer-card {{ background:{p['card_bg']}; border:1px solid {p['card_border']}; border-radius:22px;
     padding:30px 40px; box-shadow:0 24px 60px rgba(2,6,23,0.35); max-width:820px; margin:auto; backdrop-filter:blur(12px); }}
 .hero {{ text-align:center; padding:22px 0 8px; animation: rise .6s ease both; }}
@@ -675,6 +693,12 @@ def broksum_score(kode: str):
 # ==============================================================================
 NEWS_FEEDS = {
     "CNBC Indonesia": "https://www.cnbcindonesia.com/market/rss",
+    "Detik Finance": "https://finance.detik.com/rss",
+    "Kontan": "https://www.kontan.co.id/rss",
+    "Bisnis.com": "https://www.bisnis.com/rss",
+    "Investing.com": "https://www.investing.com/rss/news.rss",
+    "Antara Ekonomi": "https://www.antaranews.com/rss/ekonomi",
+    "Bloomberg (Google News)": "https://news.google.com/rss/search?q=site:bloomberg.com+markets&hl=en-US&gl=US&ceid=US:en",
     "Yahoo Finance (IHSG)": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EJKSE&region=US&lang=en-US",
 }
 POS_WORDS = {"laba", "naik", "untung", "ekspansi", "akuisisi", "dividen", "rekor", "tumbuh",
@@ -685,23 +709,56 @@ NEG_WORDS = {"rugi", "turun", "anjlok", "gugatan", "default", "pailit", "phk", "
              "cut", "down", "slump", "crash"}
 
 
+def _clean_html(s: str, limit: int = 240) -> str:
+    """Bersihkan tag HTML & entitas dari ringkasan RSS, lalu potong."""
+    if not s:
+        return ""
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = html.unescape(s)
+    s = re.sub(r"\s+", " ", s).strip()
+    # Buang ekor "View Full Coverage"/nama sumber yang sering muncul di Google News
+    if len(s) > limit:
+        s = s[:limit].rsplit(" ", 1)[0] + "…"
+    return s
+
+
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_feed(url: str) -> list:
+def fetch_feed(url: str, source_name: str = "") -> list:
     if feedparser is None:
         return []
     try:
         feed = feedparser.parse(url)
         out = []
-        for e in feed.entries[:14]:
+        for e in feed.entries[:16]:
             title = e.get("title", "")
             tl = title.lower()
             sc = sum(1 for w in POS_WORDS if w in tl) - sum(1 for w in NEG_WORDS if w in tl)
-            src = title.rsplit(" - ", 1)[-1] if " - " in title else ""
+            src = source_name or (title.rsplit(" - ", 1)[-1] if " - " in title else "")
+            summary = _clean_html(e.get("summary", "") or e.get("description", ""))
             out.append({"judul": title, "link": e.get("link", ""),
-                        "tanggal": e.get("published", ""), "sumber": src, "skor": sc})
+                        "tanggal": e.get("published", ""), "sumber": src,
+                        "ringkas": summary, "skor": sc})
         return out
     except Exception:
         return []
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_all_feeds() -> list:
+    """Gabungkan semua sumber, dedup judul, urutkan terbaru di atas."""
+    seen, out = set(), []
+    for name, url in NEWS_FEEDS.items():
+        for n in fetch_feed(url, source_name=name):
+            key = n["judul"].strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                out.append(n)
+
+    def _ts(n):
+        d = pd.to_datetime(n.get("tanggal", ""), utc=True, errors="coerce")
+        return d.value if pd.notna(d) else -1
+    out.sort(key=_ts, reverse=True)
+    return out[:36]
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -858,7 +915,10 @@ def auth_gate(conn):
                     st.warning(L("register_incomplete"))
                 else:
                     ok, msg = register_user(conn, nu, nn, ne, npw)
-                    (st.success if ok else st.error)(msg)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
     return False, None, None
 
 
@@ -1016,6 +1076,17 @@ def _gauge(title, value, vmin, vmax, good="low", suffix=""):
     return fig
 
 
+def _render_gauge(col, fig, fallback):
+    """Render gauge atau kartu fallback. Pakai if/else (BUKAN ternary expr)
+    agar Streamlit magic tidak menulis nilai balik (None/DeltaGenerator)."""
+    with col:
+        if fig is not None:
+            _plot(fig)
+        else:
+            st.markdown(f'<div class="glass"><span class="muted">{fallback}</span></div>',
+                        unsafe_allow_html=True)
+
+
 def page_fundamental(ticker):
     st.markdown(f'<p class="page-title">{L("fund_title")}</p>', unsafe_allow_html=True)
     info = get_info(ticker)
@@ -1035,23 +1106,20 @@ def page_fundamental(ticker):
     st.markdown(f'<p class="section-h">{L("key_ratios")}</p>', unsafe_allow_html=True)
     roe = info.get("returnOnEquity")
     dy = info.get("dividendYield")
+    # yfinance kadang mengembalikan dividendYield sebagai pecahan (0.0536) atau
+    # sudah persen (5.36 / 11.69). Normalisasi: <1 dianggap pecahan -> ×100.
+    roe_pct = roe * 100 if roe is not None else None
+    dy_pct = (dy * 100 if dy < 1 else dy) if dy is not None else None
+    eps = info.get("trailingEps")
     if go is not None:
         g1, g2, g3 = st.columns(3)
-        for col, f in zip((g1, g2, g3), (
-                _gauge("PER (P/E)", info.get("trailingPE"), 0, 40, "low", "x"),
-                _gauge("PBV (P/B)", info.get("priceToBook"), 0, 8, "low", "x"),
-                _gauge("ROE", roe * 100 if roe is not None else None, 0, 40, "high", "%"))):
-            with col:
-                _plot(f) if f else st.caption("—")
+        _render_gauge(g1, _gauge("PER (P/E)", info.get("trailingPE"), 0, 40, "low", "x"), "PER: —")
+        _render_gauge(g2, _gauge("PBV (P/B)", info.get("priceToBook"), 0, 10, "low", "x"), "PBV: —")
+        _render_gauge(g3, _gauge("ROE", roe_pct, 0, 40, "high", "%"), "ROE: —")
         g4, g5, g6 = st.columns(3)
-        with g4:
-            f = _gauge("DER", info.get("debtToEquity"), 0, 200, "low", "")
-            _plot(f) if f else st.caption("DER: —")
-        with g5:
-            f = _gauge("Dividend Yield", dy * 100 if dy is not None else None, 0, 12, "high", "%")
-            _plot(f) if f else st.caption("Div Yield: —")
+        _render_gauge(g4, _gauge("DER", info.get("debtToEquity"), 0, 200, "low", ""), "DER: —")
+        _render_gauge(g5, _gauge("Dividend Yield", dy_pct, 0, 12, "high", "%"), "Div Yield: —")
         with g6:
-            eps = info.get("trailingEps")
             st.markdown(kpi_card(L("eps"), f"{eps:,.0f}" if eps is not None else "—",
                                  f'<span class="muted">{L("eps_sub")}</span>'), unsafe_allow_html=True)
 
@@ -1091,21 +1159,123 @@ def page_fundamental(ticker):
     st.caption(L("fund_source"))
 
 
+DEFAULT_WATCHLIST = ["BBCA", "BBRI", "BMRI", "BBNI", "TLKM", "ASII", "ADRO", "ANTM", "GOTO", "UNVR"]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def bandar_metrics(kode: str) -> dict:
+    """
+    Bandarmology berbasis OHLCV publik (yfinance), tanpa data broker berbayar:
+      - VWAP (Volume Weighted Average Price) periode 3 bulan
+      - A/D Line (Accumulation/Distribution) & slope-nya
+      - OBV (On-Balance Volume) & slope-nya
+      - rasio volume 5 hari vs 20 hari
+    Klasifikasi Indikasi: Akumulasi / Distribusi / Markup / Markdown / Netral.
+    """
+    df = get_history(to_jk(kode), period="3mo")
+    if df is None or df.empty or len(df) < 20:
+        return None
+    c, h, l, v = df["Close"], df["High"], df["Low"], df["Volume"]
+    typ = (h + l + c) / 3
+    vwap = (typ * v).cumsum() / v.cumsum().replace(0, np.nan)
+    last_c, last_vwap = float(c.iloc[-1]), float(vwap.iloc[-1])
+
+    mfm = ((c - l) - (h - c)) / (h - l).replace(0, np.nan)
+    adl = (mfm.fillna(0) * v).cumsum()
+    obv = (np.sign(c.diff()).fillna(0) * v).cumsum()
+    n = min(10, len(df) - 1)
+    adl_up = float(adl.iloc[-1] - adl.iloc[-n]) > 0
+    obv_up = float(obv.iloc[-1] - obv.iloc[-n]) > 0
+
+    vol_recent = float(v.iloc[-5:].mean())
+    vol_base = float(v.iloc[-20:].mean()) or 1.0
+    vol_ratio = vol_recent / vol_base
+    above = last_c >= last_vwap
+
+    if above and adl_up and obv_up:
+        ind = "Akumulasi"
+    elif (not above) and (not adl_up) and (not obv_up):
+        ind = "Distribusi"
+    elif above and obv_up:
+        ind = "Markup"
+    elif (not above) and (not obv_up):
+        ind = "Markdown"
+    else:
+        ind = "Netral"
+
+    _, bk_label, _ = broksum_score(kode)          # dari FastAPI broksum bila ada
+    broker = bk_label if bk_label not in ("n/a", "") else "—"
+
+    return {"Emiten": kode, "Harga": round(last_c, 2), "VWAP": round(last_vwap, 2),
+            "vs VWAP %": round((last_c / last_vwap - 1) * 100, 2) if last_vwap else None,
+            "Volume_Transaksi": int(vol_recent), "Vol Ratio": round(vol_ratio, 2),
+            "Broker_Dominan": broker, "Indikasi_Nipu": ind}
+
+
+def _vwap_chart(kode: str):
+    df = get_history(to_jk(kode), period="3mo")
+    if df is None or df.empty or go is None or make_subplots is None:
+        return
+    c = df["Close"]
+    typ = (df["High"] + df["Low"] + c) / 3
+    vwap = (typ * df["Volume"]).cumsum() / df["Volume"].cumsum().replace(0, np.nan)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
+    fig.add_trace(go.Scatter(x=df.index, y=c, name="Close", line=dict(color=ACCENT_A, width=1.8)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=vwap, name="VWAP", line=dict(color="#f59e0b", width=1.6, dash="dot")), row=1, col=1)
+    vc = [UP if cl >= op else DOWN for op, cl in zip(df["Open"], df["Close"])]
+    fig.add_trace(go.Bar(x=df.index, y=df["Volume"], name="Volume", marker_color=vc, opacity=0.6), row=2, col=1)
+    _plot(_style_fig(fig, height=380))
+
+
+def _ind_color(val):
+    m = {"Akumulasi": "#10b981", "Markup": "#34d399",
+         "Distribusi": "#ef4444", "Markdown": "#f87171", "Netral": "#94a3b8"}
+    return f"color:{m.get(val, '#94a3b8')};font-weight:700"
+
+
 def page_radar():
     st.markdown(f'<p class="page-title">{L("radar_title")}</p>', unsafe_allow_html=True)
     st.caption(L("radar_caption"))
 
-    # Mockup placeholder — dataframe kosong dengan skema yang direncanakan.
-    radar_df = pd.DataFrame(columns=[
-        "Emiten", "Broker_Dominan", "Volume_Transaksi", "Indikasi_Nipu"])
-    # TODO: Implement VWAP & KSEI logic here
-    #   - Tarik broker summary harian (mis. via api.py / scraper IDX)
-    #   - Hitung VWAP per broker & deteksi divergensi harga vs volume
-    #   - Padukan data kepemilikan KSEI (>=5%) untuk konfirmasi akumulasi bandar
-    #   - Klasifikasikan "Indikasi_Nipu" (markup/markdown/akumulasi/distribusi)
+    raw = st.text_input(L("radar_watchlist"), value=", ".join(DEFAULT_WATCHLIST))
+    tickers = [t.strip().upper() for t in raw.replace(";", ",").split(",") if t.strip()][:15]
 
-    st.info(L("radar_placeholder"), icon="🚧")
-    st.dataframe(radar_df, use_container_width=True, hide_index=True)
+    with st.spinner(L("radar_scanning")):
+        rows = [m for m in (bandar_metrics(t) for t in tickers) if m]
+
+    if not rows:
+        st.markdown(f'<div class="glass"><span class="muted">{L("radar_no_data")}</span></div>',
+                    unsafe_allow_html=True)
+        return
+
+    df = pd.DataFrame(rows)
+    # ringkasan count per indikasi
+    akum = sum(1 for r in rows if r["Indikasi_Nipu"] in ("Akumulasi", "Markup"))
+    dist = sum(1 for r in rows if r["Indikasi_Nipu"] in ("Distribusi", "Markdown"))
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(kpi_card("Akumulasi/Markup", f"{akum}", '<span class="up">net beli arah</span>', accent=True), unsafe_allow_html=True)
+    c2.markdown(kpi_card("Distribusi/Markdown", f"{dist}", '<span class="down">net jual arah</span>'), unsafe_allow_html=True)
+    c3.markdown(kpi_card("Dipindai", f"{len(rows)}", '<span class="muted">emiten</span>'), unsafe_allow_html=True)
+    st.write("")
+
+    base = df.style
+    cell_style = base.map if hasattr(base, "map") else base.applymap  # pandas 2.1+ vs 2.0
+    styler = cell_style(_ind_color, subset=["Indikasi_Nipu"]).format(
+        {"Harga": "{:,.0f}", "VWAP": "{:,.0f}", "vs VWAP %": "{:+.2f}",
+         "Volume_Transaksi": "{:,.0f}", "Vol Ratio": "{:.2f}"})
+    st.dataframe(styler, use_container_width=True, hide_index=True)
+
+    st.write("")
+    st.markdown(f'<p class="section-h">{L("radar_detail")}</p>', unsafe_allow_html=True)
+    sel = st.selectbox("Emiten", [r["Emiten"] for r in rows], label_visibility="collapsed")
+    _vwap_chart(sel)
+
+    st.caption(L("radar_note"))
+    # TODO: Implement VWAP & KSEI logic here
+    #   VWAP/OBV/A-D sudah diimplementasikan di atas dari OHLCV publik.
+    #   Yang masih TODO (butuh sumber berbayar / scraping resmi):
+    #   - Broker summary per-emiten harian (net beli/jual per broker) via api.py/IDX
+    #   - Data kepemilikan KSEI (>=5%) untuk konfirmasi akumulasi bandar/konglomerat
 
 
 def _time_ago(published: str) -> str:
@@ -1129,12 +1299,15 @@ def _time_ago(published: str) -> str:
 def page_news(ticker):
     st.markdown(f'<p class="page-title">{L("news_title")}</p>', unsafe_allow_html=True)
     kode = ticker.replace(".JK", "")
-    options = list(NEWS_FEEDS.keys()) + [f"Google News · {kode}"]
+    options = [L("news_all")] + list(NEWS_FEEDS.keys()) + [f"Google News · {kode}"]
     source = st.radio(L("news_source"), options, horizontal=True)
-    if source.startswith("Google News"):
-        news = fetch_news_emiten(kode)
-    else:
-        news = fetch_feed(NEWS_FEEDS[source])
+    with st.spinner("…"):
+        if source == L("news_all"):
+            news = fetch_all_feeds()
+        elif source.startswith("Google News"):
+            news = fetch_news_emiten(kode)
+        else:
+            news = fetch_feed(NEWS_FEEDS[source], source_name=source)
 
     if not news:
         st.markdown(f'<div class="glass"><span class="muted">{L("no_news")}</span></div>', unsafe_allow_html=True)
@@ -1156,10 +1329,13 @@ def page_news(ticker):
                 '<span class="chip chip-down">−</span>' if sc < 0 else
                 '<span class="chip chip-neut">•</span>')
         meta = " · ".join(x for x in [n.get("sumber", ""), _time_ago(n.get("tanggal", ""))] if x)
+        summary = n.get("ringkas", "")
+        sum_html = f'<div class="news-sum">{summary}</div>' if summary else ""
         st.markdown(
             f'<a class="news-card" href="{n["link"]}" target="_blank">'
             f'<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">'
             f'<span class="news-title">{n["judul"]}</span>{chip}</div>'
+            f'{sum_html}'
             f'<div class="news-meta">{meta}</div></a>', unsafe_allow_html=True)
 
 
