@@ -1,8 +1,7 @@
 # The Intrinsic — dependensi
 # Streamlit app
 streamlit>=1.33
-supabase>=2.4
-streamlit-authenticator==0.3.2   # API sering berubah antar versi — pin!
+st-gsheets-connection>=0.0.4   # Google Sheets (Users, Portfolios) via st.secrets
 yfinance>=0.2.40
 pandas>=2.0
 numpy>=1.24

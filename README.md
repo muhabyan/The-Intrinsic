@@ -1,7 +1,9 @@
 # The Intrinsic
 
 Platform riset saham & manajemen portofolio untuk emiten IDX.
-**Streamlit + Supabase**, dengan layanan **FastAPI** terpisah untuk broker summary.
+**Streamlit + Google Sheets** (Users & Portfolios via `st-gsheets-connection`),
+dwi-tema **Dark/Light**, dwi-bahasa **ID/EN**, chart interaktif **Plotly**, dan
+berita real-time **RSS**. Layanan **FastAPI** opsional untuk broker summary.
 
 > ⚠️ **Bukan nasihat investasi.** Output mesin adalah *kondisi objektif* berbasis
 > data (Bullish/Bearish/Neutral) untuk edukasi & riset mandiri — bukan ajakan
@@ -43,56 +45,51 @@ Skor broksum lalu masuk ke komposit: `0.55·teknikal + 0.30·broksum + 0.15·ber
 
 ---
 
-## Coba cepat (Mode Tamu — tanpa Supabase)
+## Coba cepat (Mode Tamu — tanpa database)
 
-Cukup untuk melihat apakah situs jalan, tanpa database / akun / secrets:
+Cukup untuk melihat situs jalan, tanpa Google Sheets / akun / secrets:
 
 ```bash
-pip install streamlit pandas numpy yfinance feedparser requests
+pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Buka **http://localhost:8501**, setujui disclaimer, lalu klik
-**"👤 Masuk sebagai Tamu"**. Dashboard, The Engine, Fundamental, dan Berita
-berfungsi (data pasar dari yfinance + berita dari Google News). Halaman
-**Portofolio** dan **Konglo Tracker** dinonaktifkan sampai Supabase diisi.
+Buka **http://localhost:8501**, setujui disclaimer, klik **"👤 Masuk sebagai Tamu"**.
+Dashboard, The Engine, Fundamental, Radar, dan Berita berfungsi. **Portofolio**
+nonaktif sampai Google Sheets dikonfigurasi. Toggle **bahasa (ID/EN)** dan
+**Dark/Light** ada di sidebar.
 
 > Tidak perlu `secrets.toml` untuk Mode Tamu.
 
 ---
 
-## Setup penuh (dengan akun + database)
+## Setup penuh (akun + Google Sheets)
 
-### 1. Database (Supabase SQL Editor)
-```sql
--- urut:
-\i db/schema.sql              -- buat tabel
-\i db/seed_konglo.sql         -- (opsional) data demo Konglo Tracker
-\i db/seed_broker_summary.sql -- (opsional) data demo broksum
-```
-> Seed bertanda **DEMO** — ganti dengan data terverifikasi IDX/KSEI untuk produksi.
+1. **Buat Google Spreadsheet** dengan dua worksheet: `Users` dan `Portfolios`.
+   - `Users`     header: `username, name, email, password_hash, created_at`
+   - `Portfolios` header: `username, kode_saham, harga_rata2, jumlah_lot, created_at`
+2. **Buat Service Account** di Google Cloud (aktifkan Google Sheets API), unduh
+   kunci JSON-nya, lalu **bagikan (Share)** spreadsheet ke `client_email`
+   service account tersebut dengan akses **Editor**.
+3. **Isi secrets** — JANGAN commit `credentials.json`. Semua dibaca dari
+   `st.secrets`:
+   ```bash
+   cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+   # tempel kredensial service account ke blok [connections.gsheets]
+   ```
+   Lihat format TOML lengkap di `.streamlit/secrets.toml.example`.
+4. **Install & jalankan**:
+   ```bash
+   pip install -r requirements.txt
+   streamlit run app.py
 
-### 2. Secrets
-```bash
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# isi url + anon key Supabase, cookie_key acak, dan (opsional) [broksum].api_url
-```
+   # (opsional) layanan broksum — terminal lain
+   export SUPABASE_URL=... SUPABASE_KEY=...
+   uvicorn api:app --reload --port 8000
+   ```
 
-### 3. Install
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Jalankan
-```bash
-# Streamlit
-streamlit run app.py
-
-# (opsional) layanan broksum — di terminal lain
-export SUPABASE_URL="https://xxxx.supabase.co"
-export SUPABASE_KEY="<service_role_key>"   # server-side saja
-uvicorn api:app --reload --port 8000
-```
+Registrasi/login menulis & membaca worksheet `Users`; password di-hash
+(PBKDF2-SHA256) sebelum disimpan. Portofolio tersimpan di worksheet `Portfolios`.
 
 ### Contoh ingest broksum
 ```bash
