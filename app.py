@@ -367,7 +367,13 @@ div[role="radiogroup"] label:hover {{ background:rgba(99,102,241,0.12); }}
 .stButton>button[kind="primary"]:hover {{ transform:translateY(-2px); box-shadow:0 14px 34px rgba(99,102,241,0.55); }}
 div[data-testid="stMetricValue"] {{ color:{p['title']}; font-family:'JetBrains Mono',monospace; }}
 div[data-testid="stMetricLabel"] {{ color:{p['muted']}; }}
-#MainMenu, footer, header {{ visibility:hidden; }}
+/* Sembunyikan menu/footer/toolbar TAPI biarkan kontrol buka-sidebar tetap ada */
+#MainMenu, footer {{ visibility:hidden; }}
+header[data-testid="stHeader"] {{ background:transparent; box-shadow:none; }}
+[data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {{ display:none !important; }}
+[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{
+    visibility:visible !important; opacity:1 !important; z-index:1000; }}
+[data-testid="stSidebarCollapsedControl"] svg, [data-testid="collapsedControl"] svg {{ color:{p['text']}; fill:{p['text']}; }}
 </style>
 """, unsafe_allow_html=True)
 
