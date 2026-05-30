@@ -107,8 +107,9 @@ def get_supabase() -> "Client":
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["key"]
         return create_client(url, key)
-    except Exception as exc:
-        st.error(f"Gagal konek Supabase: {exc}. Periksa .streamlit/secrets.toml")
+    except Exception:
+        # Tidak dikonfigurasi / gagal -> diam saja. Mode Tamu tetap jalan tanpa
+        # Supabase; halaman yang butuh database akan memberi tahu sendiri.
         return None
 
 
@@ -411,12 +412,38 @@ def load_credentials(sb) -> dict:
     return creds
 
 
+def _authenticator_configured() -> bool:
+    """True bila blok [authenticator] ada di secrets.toml."""
+    try:
+        return bool(st.secrets["authenticator"]["cookie_name"])
+    except Exception:
+        return False
+
+
 def auth_gate(sb):
     """Tangani login & registrasi. Return (status, username, name) atau None."""
-    if stauth is None:
-        st.error("Paket `streamlit-authenticator` belum terpasang.")
-        st.stop()
+    # --- Sesi tamu yang sudah aktif: lewati seluruh gerbang ---
+    if st.session_state.get("is_guest"):
+        return True, "guest", "Tamu"
 
+    st.markdown('<p class="brand">The Intrinsic</p>', unsafe_allow_html=True)
+
+    # --- Mode Tamu: jelajahi tanpa akun / tanpa Supabase ---
+    st.info("**Mode Tamu** — lihat-lihat aplikasi tanpa akun. "
+            "Halaman yang butuh database (Portofolio, Konglo Tracker) "
+            "dinonaktifkan sampai Supabase dikonfigurasi.")
+    if st.button("👤 Masuk sebagai Tamu", type="primary", use_container_width=False):
+        st.session_state["is_guest"] = True
+        st.rerun()
+
+    # Bila auth berbasis akun belum bisa dipakai (paket/secrets/Supabase belum
+    # siap), berhenti di sini — Mode Tamu sudah cukup untuk mencoba situs.
+    if stauth is None or sb is None or not _authenticator_configured():
+        st.caption("Login akun dinonaktifkan (streamlit-authenticator/Supabase/secrets "
+                   "belum siap). Gunakan **Masuk sebagai Tamu** di atas.")
+        return False, None, None
+
+    st.markdown("---")
     creds = load_credentials(sb)
     authenticator = stauth.Authenticate(
         creds,
@@ -425,7 +452,6 @@ def auth_gate(sb):
         int(st.secrets["authenticator"]["cookie_expiry_days"]),
     )
 
-    st.markdown('<p class="brand">The Intrinsic</p>', unsafe_allow_html=True)
     tab_login, tab_register = st.tabs(["🔑 Masuk", "📝 Daftar"])
 
     with tab_login:
@@ -657,7 +683,14 @@ def main():
     with st.sidebar:
         st.markdown('<p class="brand">The Intrinsic</p>', unsafe_allow_html=True)
         st.markdown('<p class="brand-sub">Equity Research Platform</p>', unsafe_allow_html=True)
-        st.caption(f"👤 {name}")
+        if st.session_state.get("is_guest"):
+            st.caption("👤 Tamu · mode demo")
+            if st.button("Keluar", use_container_width=True):
+                for k in ("is_guest", "authentication_status", "username", "name"):
+                    st.session_state.pop(k, None)
+                st.rerun()
+        else:
+            st.caption(f"👤 {name}")
         st.markdown("---")
         page = st.radio("Navigasi", [
             "📊 Dashboard", "⚙️ The Engine", "🔍 Fundamental",

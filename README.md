@@ -43,7 +43,25 @@ Skor broksum lalu masuk ke komposit: `0.55·teknikal + 0.30·broksum + 0.15·ber
 
 ---
 
-## Setup
+## Coba cepat (Mode Tamu — tanpa Supabase)
+
+Cukup untuk melihat apakah situs jalan, tanpa database / akun / secrets:
+
+```bash
+pip install streamlit pandas numpy yfinance feedparser requests
+streamlit run app.py
+```
+
+Buka **http://localhost:8501**, setujui disclaimer, lalu klik
+**"👤 Masuk sebagai Tamu"**. Dashboard, The Engine, Fundamental, dan Berita
+berfungsi (data pasar dari yfinance + berita dari Google News). Halaman
+**Portofolio** dan **Konglo Tracker** dinonaktifkan sampai Supabase diisi.
+
+> Tidak perlu `secrets.toml` untuk Mode Tamu.
+
+---
+
+## Setup penuh (dengan akun + database)
 
 ### 1. Database (Supabase SQL Editor)
 ```sql
