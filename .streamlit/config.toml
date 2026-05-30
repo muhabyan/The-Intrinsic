@@ -1,0 +1,11 @@
+# Tema aplikasi — dipaksa "light" agar teks selalu kontras di atas latar
+# terang yang dipakai CSS kustom (mencegah teks tak terbaca saat OS dark mode).
+[theme]
+base = "light"
+backgroundColor = "#f7f8fa"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0f172a"
+primaryColor = "#4f46e5"
+
+[browser]
+gatherUsageStats = false

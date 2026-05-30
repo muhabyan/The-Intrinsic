@@ -78,6 +78,7 @@ div[data-testid="stMetric"] {
     padding:18px 20px; box-shadow:0 1px 3px rgba(15,23,42,0.04);
 }
 div[data-testid="stMetricLabel"] { color:#94a3b8; font-size:0.78rem; font-weight:600; }
+div[data-testid="stMetricValue"] { color:#0f172a; }
 .section-h { font-size:1.15rem; font-weight:700; color:#0f172a; margin:8px 0 4px; }
 .badge { display:inline-block; padding:8px 22px; border-radius:10px; font-weight:800; font-size:1.2rem; }
 .bull { background:#dcfce7; color:#15803d; }
