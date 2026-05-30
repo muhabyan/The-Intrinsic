@@ -1,11 +1,11 @@
-# Tema aplikasi — dipaksa "light" agar teks selalu kontras di atas latar
-# terang yang dipakai CSS kustom (mencegah teks tak terbaca saat OS dark mode).
+# Tema dark-elegant (fintech). CSS kustom di app.py menyempurnakan tampilan.
 [theme]
-base = "light"
-backgroundColor = "#f7f8fa"
-secondaryBackgroundColor = "#ffffff"
-textColor = "#0f172a"
-primaryColor = "#4f46e5"
+base = "dark"
+backgroundColor = "#0b1020"
+secondaryBackgroundColor = "#131a30"
+textColor = "#e5e7eb"
+primaryColor = "#6366f1"
+font = "sans serif"
 
 [browser]
 gatherUsageStats = false
