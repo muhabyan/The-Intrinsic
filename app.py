@@ -367,13 +367,23 @@ div[role="radiogroup"] label:hover {{ background:rgba(99,102,241,0.12); }}
 .stButton>button[kind="primary"]:hover {{ transform:translateY(-2px); box-shadow:0 14px 34px rgba(99,102,241,0.55); }}
 div[data-testid="stMetricValue"] {{ color:{p['title']}; font-family:'JetBrains Mono',monospace; }}
 div[data-testid="stMetricLabel"] {{ color:{p['muted']}; }}
-/* Sembunyikan menu/footer/toolbar TAPI biarkan kontrol buka-sidebar tetap ada */
+/* Sembunyikan footer/menu/Deploy TAPI JANGAN sentuh header agar kontrol
+   buka-sidebar (panah) tetap muncul. Toolbar tidak di-display:none supaya
+   tombol expand yang berada di area itu tidak ikut hilang. */
 #MainMenu, footer {{ visibility:hidden; }}
+[data-testid="stDecoration"] {{ display:none; }}
+[data-testid="stToolbarActions"] {{ visibility:hidden; }}   /* sembunyikan tombol Deploy saja */
 header[data-testid="stHeader"] {{ background:transparent; box-shadow:none; }}
-[data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {{ display:none !important; }}
-[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"] {{
-    visibility:visible !important; opacity:1 !important; z-index:1000; }}
-[data-testid="stSidebarCollapsedControl"] svg, [data-testid="collapsedControl"] svg {{ color:{p['text']}; fill:{p['text']}; }}
+/* Paksa kontrol buka-sidebar selalu terlihat & jelas (lintas versi Streamlit) */
+[data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"], [data-testid="stExpandSidebarButton"] {{
+    visibility:visible !important; opacity:1 !important; display:flex !important;
+    z-index:1000000 !important; }}
+[data-testid="stSidebarCollapsedControl"] button, [data-testid="collapsedControl"] button {{
+    background:linear-gradient(135deg,var(--accent-a),var(--accent-b)) !important;
+    border-radius:10px !important; box-shadow:0 6px 18px rgba(99,102,241,0.5) !important; }}
+[data-testid="stSidebarCollapsedControl"] svg, [data-testid="collapsedControl"] svg,
+[data-testid="stSidebarCollapseButton"] svg {{ color:#fff !important; fill:#fff !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -892,10 +902,7 @@ def disclaimer_gate() -> bool:
     if st.session_state.get("agreed_disclaimer"):
         return True
     st.write("")
-    st.markdown('<div class="disclaimer-card">', unsafe_allow_html=True)
-    st.markdown('<div class="hero">', unsafe_allow_html=True)
     render_brand(big=True)
-    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown(f"### {L('disclaimer_title')}")
     if st.session_state.get("lang") == "en":
         st.markdown("""
@@ -932,7 +939,6 @@ Dengan menekan **"Saya Setuju"**, Anda menerima ketentuan ini.
             st.rerun()
     with c2:
         st.caption(L("must_agree"))
-    st.markdown('</div>', unsafe_allow_html=True)
     return False
 
 
@@ -948,9 +954,8 @@ def auth_gate(conn):
     st.write("")
     cL, cM, cR = st.columns([1, 2, 1])
     with cM:
-        st.markdown('<div class="hero">', unsafe_allow_html=True)
         render_brand(big=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.write("")
         st.info(L("guest_info"))
         if st.button(L("login_as_guest"), type="primary", use_container_width=True):
             st.session_state["is_guest"] = True
