@@ -95,6 +95,10 @@ TEXT = {
         "register_incomplete": "Lengkapi username, nama, dan password.",
         "register_dup": "Username sudah dipakai.",
         "db_off": "Database (Google Sheets) belum dikonfigurasi — gunakan Mode Tamu.",
+        "gs_readonly": "Google Sheets masih mode publik (read-only). Untuk menyimpan, isi "
+                       "kredensial Service Account di Secrets aplikasi (blok [connections.gsheets], "
+                       "type='service_account') lalu share spreadsheet ke email service account "
+                       "sebagai Editor. Lihat README.",
         "disclaimer_title": "⚠️ Disclaimer & Ketentuan Penggunaan",
         "agree": "✅ Saya Setuju", "must_agree": "Anda harus menyetujui untuk melanjutkan.",
         "nav_dashboard": "📊 Dashboard", "nav_engine": "⚙️ The Engine",
@@ -173,6 +177,10 @@ TEXT = {
         "register_incomplete": "Fill username, name, and password.",
         "register_dup": "Username already taken.",
         "db_off": "Database (Google Sheets) not configured — use Guest mode.",
+        "gs_readonly": "Google Sheets is in public (read-only) mode. To save data, add the "
+                       "Service Account credentials to the app Secrets ([connections.gsheets], "
+                       "type='service_account') and share the spreadsheet with the service-account "
+                       "email as Editor. See README.",
         "disclaimer_title": "⚠️ Disclaimer & Terms of Use",
         "agree": "✅ I Agree", "must_agree": "You must agree to continue.",
         "nav_dashboard": "📊 Dashboard", "nav_engine": "⚙️ The Engine",
@@ -436,7 +444,11 @@ def _write_ws(conn, worksheet, df) -> bool:
         conn.update(worksheet=worksheet, data=df)
         return True
     except Exception as exc:
-        st.error(f"Gagal menulis ke Google Sheets: {exc}")
+        msg = str(exc)
+        if any(k in msg.lower() for k in ("public", "service account", "permission", "read-only")):
+            st.error(L("gs_readonly"))
+        else:
+            st.error(f"Gagal menulis ke Google Sheets: {exc}")
         return False
 
 
@@ -463,7 +475,8 @@ def register_user(conn, username, name, email, pw) -> tuple:
     row = {"username": username, "name": name, "email": email,
            "password_hash": hash_pw(pw), "created_at": datetime.utcnow().isoformat()}
     new = pd.concat([df, pd.DataFrame([row])], ignore_index=True) if not df.empty else pd.DataFrame([row])
-    return (True, L("register_ok")) if _write_ws(conn, USERS_WS, new) else (False, "Gagal menyimpan.")
+    # _write_ws sudah menampilkan pesan error spesifik bila gagal; jangan duplikasi.
+    return (True, L("register_ok")) if _write_ws(conn, USERS_WS, new) else (False, "")
 
 
 def login_user(conn, username, pw) -> tuple:
@@ -991,7 +1004,7 @@ def auth_gate(conn):
                     ok, msg = register_user(conn, nu, nn, ne, npw)
                     if ok:
                         st.success(msg)
-                    else:
+                    elif msg:
                         st.error(msg)
     return False, None, None
 
